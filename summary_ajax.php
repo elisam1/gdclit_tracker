@@ -14,12 +14,14 @@ $role = $_SESSION['role'];
 $pending = $in_progress = $resolved = 0;
 
 if ($role == 'staff') {
-    $sql = "SELECT status, COUNT(*) as count FROM issues WHERE user_id='$user_id' GROUP BY status";
+    $stmt = $conn->prepare('SELECT status, COUNT(*) as count FROM issues WHERE user_id = ? GROUP BY status');
+    $stmt->bind_param('i', $user_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
 } else {
-    $sql = "SELECT status, COUNT(*) as count FROM issues GROUP BY status";
+    // No params; safe to run directly
+    $result = mysqli_query($conn, "SELECT status, COUNT(*) as count FROM issues GROUP BY status");
 }
-
-$result = mysqli_query($conn, $sql);
 
 while ($row = mysqli_fetch_assoc($result)) {
     switch($row['status']) {
@@ -34,3 +36,4 @@ echo json_encode([
     'in_progress' => $in_progress,
     'resolved' => $resolved
 ]);
+if (isset($stmt)) { $stmt->close(); }

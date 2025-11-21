@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'db.php';
+header('Content-Type: application/json');
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'it') {
     http_response_code(403);

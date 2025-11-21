@@ -27,8 +27,9 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'it') {
         .filters button:hover { background: #0056b3; }
 
         /* --- Issue Card --- */
-        .issue-card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 15px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05); display:flex; justify-content: space-between; flex-wrap: wrap; position: relative; }
+        .issue-card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08); display:flex; justify-content: space-between; flex-wrap: wrap; position: relative; transition: transform .2s ease, box-shadow .2s ease; }
+        .issue-card:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,0.12); }
         .issue-info { flex: 1 1 60%; }
         .issue-info p { margin: 5px 0; }
         .badge { padding: 5px 10px; border-radius: 20px; font-weight: 500; color:white; font-size:13px; }
@@ -46,12 +47,16 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'it') {
 
         /* --- Modal --- */
         .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.6); justify-content:center; align-items:center; }
-        .modal-content { background:white; padding:20px; border-radius:8px; max-width:600px; width:90%; position:relative; }
+        .modal-content { background:white; padding:20px; border-radius:12px; max-width:600px; width:90%; position:relative; box-shadow: 0 10px 24px rgba(0,0,0,0.2); max-height: 80vh; overflow-y: auto; border: 1px solid rgba(0,123,255,0.25); }
         .close-btn { position:absolute; top:10px; right:10px; cursor:pointer; font-weight:bold; font-size:18px; }
+        .modal-content h3 { background: linear-gradient(135deg, #2962ff, #4e8cff); color:white; padding:10px 14px; border-radius:8px; margin:-8px 0 12px; box-shadow: 0 6px 14px rgba(41,98,255,0.2); }
 
         /* --- Notification --- */
         .notification { position: fixed; top: 20px; right: 20px; background: #28a745; color: white; padding: 12px 20px; border-radius: 5px; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.2); animation: slidein 0.5s forwards; }
         @keyframes slidein { from { opacity:0; transform: translateX(100%); } to { opacity:1; transform: translateX(0); } }
+        /* Spinner */
+        .spinner { display:none; width: 28px; height: 28px; border: 3px solid #e0e7ff; border-top-color: #2962ff; border-radius: 50%; animation: spin .9s linear infinite; margin: 10px auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -82,6 +87,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'it') {
     </div>
 
     <!-- Issues Container -->
+    <div id="listSpinner" class="spinner"></div>
     <div id="issues-container"></div>
 </main>
 
@@ -90,6 +96,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'it') {
     <div class="modal-content">
         <span class="close-btn" onclick="closeModal()">&times;</span>
         <h3>Issue Details</h3>
+        <div id="modalSpinner" class="spinner"></div>
         <p><strong>ID:</strong> <span id="modal-id"></span></p>
         <p><strong>Reporter:</strong> <span id="modal-reporter"></span></p>
         <p><strong>Title:</strong> <span id="modal-title"></span></p>
@@ -99,21 +106,50 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'it') {
         <p><strong>Description:</strong></p>
         <p id="modal-description"></p>
         <p id="modal-attachment"></p>
+        <hr>
+        <h4>Comments</h4>
+        <div id="modal-comments"></div>
+</div>
+</div>
+
+<!-- Update Modal -->
+<div class="modal" id="update-modal">
+    <div class="modal-content">
+        <span class="close-btn" onclick="closeUpdateModal()">&times;</span>
+        <h3>Update Issue Status</h3>
+        <div id="updateSpinner" class="spinner"></div>
+        <p><strong>ID:</strong> <span id="update-issue-id"></span></p>
+        <label for="update-status">Status</label>
+        <select id="update-status">
+            <option value="Pending">Pending</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Resolved">Resolved</option>
+        </select>
+        <label for="update-comment">Comment (optional)</label>
+        <textarea id="update-comment" rows="4" placeholder="Add a comment for the reporter"></textarea>
+        <button onclick="submitUpdate()">Save</button>
     </div>
 </div>
 
 <div class="notification" id="notification"></div>
 
 <script>
+function formatDate(dtStr) {
+    if (!dtStr) return '';
+    const safe = dtStr.replace(' ', 'T');
+    const d = new Date(safe);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 // --- Fetch and Render Issues ---
 let lastIssueCount = 0;
 function loadIssues() {
     let statusFilter = document.getElementById('filter-status').value;
     let priorityFilter = document.getElementById('filter-priority').value;
-
+    document.getElementById('listSpinner').style.display = 'block';
     fetch('fetch_all_issues_ajax.php')
     .then(res => res.json())
     .then(data => {
+        document.getElementById('listSpinner').style.display = 'none';
         if(data.length > lastIssueCount) {
             showNotification('New issue reported!');
         }
@@ -138,12 +174,8 @@ function loadIssues() {
                     <p><strong>Created:</strong> ${issue.created_at}</p>
                 </div>
                 <div class="actions">
-                    <select id="status-${issue.id}" onchange="updateStatus(${issue.id})">
-                        <option value="Pending" ${issue.status=='Pending'?'selected':''}>Pending</option>
-                        <option value="In Progress" ${issue.status=='In Progress'?'selected':''}>In Progress</option>
-                        <option value="Resolved" ${issue.status=='Resolved'?'selected':''}>Resolved</option>
-                    </select>
-                    <button onclick="openModal(${issue.id})">View</button>
+                    <button class="btn btn-update" onclick="openUpdateModal(${issue.id}, '${issue.status}')">Update</button>
+                    <button class="btn btn-view" onclick="openModal(${issue.id})">View</button>
                 </div>
             `;
             container.appendChild(card);
@@ -152,26 +184,48 @@ function loadIssues() {
 }
 
 // --- AJAX Status Update ---
-function updateStatus(issueId) {
-    let status = document.getElementById('status-' + issueId).value;
+function openUpdateModal(issueId, currentStatus) {
+    document.getElementById('update-issue-id').innerText = issueId;
+    document.getElementById('update-status').value = currentStatus;
+    document.getElementById('update-comment').value = '';
+    document.getElementById('update-modal').style.display = 'flex';
+}
+function closeUpdateModal() { document.getElementById('update-modal').style.display = 'none'; }
+
+function submitUpdate() {
+    document.getElementById('updateSpinner').style.display = 'block';
+    const issueId = parseInt(document.getElementById('update-issue-id').innerText, 10);
+    const status = document.getElementById('update-status').value;
+    const comment = document.getElementById('update-comment').value.trim();
+
+    const body = 'issue_id='+issueId+'&status='+encodeURIComponent(status)+'&comment='+encodeURIComponent(comment);
+
     fetch('update_status_ajax.php', {
         method: 'POST',
         headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: 'issue_id='+issueId+'&status='+encodeURIComponent(status)
-    }).then(res => res.text())
+        body
+    })
+    .then(res => res.text())
     .then(data => {
-        if(data==='success'){
+        document.getElementById('updateSpinner').style.display = 'none';
+        if (data === 'success') {
             document.getElementById('status-text-'+issueId).innerText = status;
             showNotification('Status updated!');
-        } else { alert('Error updating status'); }
-    });
+            closeUpdateModal();
+        } else {
+            alert('Error updating status');
+        }
+    })
+    .catch(() => alert('Error updating status'));
 }
 
 // --- Modal ---
 function openModal(issueId) {
+    document.getElementById('modalSpinner').style.display = 'block';
     fetch('fetch_issue_detail_ajax.php?id='+issueId)
     .then(res => res.json())
     .then(issue => {
+        document.getElementById('modalSpinner').style.display = 'none';
         document.getElementById('modal-id').innerText = issue.id;
         document.getElementById('modal-reporter').innerText = issue.reporter_name;
         document.getElementById('modal-title').innerText = issue.title;
@@ -184,6 +238,16 @@ function openModal(issueId) {
         } else {
             document.getElementById('modal-attachment').innerHTML = '';
         }
+        // Load comments
+        let commentsHtml = '';
+        if(issue.comments && issue.comments.length > 0) {
+            issue.comments.forEach(comment => {
+                commentsHtml += `<p><strong>${comment.commenter_name} (${formatDate(comment.created_at)}):</strong> ${comment.comment}</p>`;
+            });
+        } else {
+            commentsHtml = '<p>No comments yet.</p>';
+        }
+        document.getElementById('modal-comments').innerHTML = commentsHtml;
         document.getElementById('issue-modal').style.display = 'flex';
     });
 }
